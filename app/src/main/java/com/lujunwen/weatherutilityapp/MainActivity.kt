@@ -26,16 +26,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lujunwen.weatherutilityapp.model.CurrentWeather
+import com.lujunwen.weatherutilityapp.ui.theme.WeatherUtilityAppTheme
+import com.lujunwen.weatherutilityapp.viewmodel.WeatherViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lujunwen.weatherutilityapp.ui.theme.WeatherUtilityAppTheme
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,10 +58,20 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WeatherUtilityApp() {
+fun WeatherUtilityApp(
+    weatherViewModel: WeatherViewModel = viewModel()
+) {
     var selectedScreen by remember { mutableStateOf("Utility") }
     var selectedCity by remember { mutableStateOf("Singapore") }
     var selectedUnit by remember { mutableStateOf("Celsius") }
+
+    val weather by weatherViewModel.weather.collectAsState()
+    val isLoading by weatherViewModel.isLoading.collectAsState()
+    val errorMessage by weatherViewModel.errorMessage.collectAsState()
+
+    LaunchedEffect(selectedCity) {
+        weatherViewModel.loadWeather(selectedCity)
+    }
 
     Scaffold(
         topBar = {
@@ -92,7 +108,13 @@ fun WeatherUtilityApp() {
             if (selectedScreen == "Utility") {
                 UtilityScreen(
                     city = selectedCity,
-                    unit = selectedUnit
+                    unit = selectedUnit,
+                    weather = weather,
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    onRefresh = {
+                        weatherViewModel.loadWeather(selectedCity)
+                    }
                 )
             } else {
                 SettingsScreen(
@@ -109,54 +131,36 @@ fun WeatherUtilityApp() {
 @Composable
 fun UtilityScreen(
     city: String,
-    unit: String
+    unit: String,
+    weather: CurrentWeather?,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onRefresh: () -> Unit
 ) {
-    val temperatureCelsius = when (city) {
-        "Singapore" -> 31
-        "Kuala Lumpur" -> 29
-        "Johor Bahru" -> 30
-        else -> 31
-    }
+    val temperatureCelsius = weather?.temperature ?: 0.0
+    val humidity = weather?.humidity ?: 0
+    val windSpeed = weather?.windSpeed ?: 0.0
+    val weatherCode = weather?.weatherCode ?: 0
 
-    val feelsLikeCelsius = when (city) {
-        "Singapore" -> 34
-        "Kuala Lumpur" -> 32
-        "Johor Bahru" -> 33
-        else -> 34
-    }
-
-    val temperature = if (unit == "Celsius") {
-        "$temperatureCelsius°C"
+    val temperatureText = if (weather == null) {
+        "--"
+    } else if (unit == "Celsius") {
+        "${temperatureCelsius.roundToInt()}°C"
     } else {
-        "${(temperatureCelsius * 9 / 5) + 32}°F"
+        val fahrenheit = (temperatureCelsius * 9 / 5) + 32
+        "${fahrenheit.roundToInt()}°F"
     }
 
-    val feelsLike = if (unit == "Celsius") {
-        "$feelsLikeCelsius°C"
+    val feelsLikeText = if (weather == null) {
+        "--"
+    } else if (unit == "Celsius") {
+        "${(temperatureCelsius + 2).roundToInt()}°C"
     } else {
-        "${(feelsLikeCelsius * 9 / 5) + 32}°F"
+        val fahrenheit = ((temperatureCelsius + 2) * 9 / 5) + 32
+        "${fahrenheit.roundToInt()}°F"
     }
 
-    val condition = when (city) {
-        "Singapore" -> "Partly Cloudy"
-        "Kuala Lumpur" -> "Thunderstorms"
-        "Johor Bahru" -> "Cloudy"
-        else -> "Partly Cloudy"
-    }
-
-    val humidity = when (city) {
-        "Singapore" -> "78%"
-        "Kuala Lumpur" -> "82%"
-        "Johor Bahru" -> "80%"
-        else -> "78%"
-    }
-
-    val windSpeed = when (city) {
-        "Singapore" -> "12 km/h"
-        "Kuala Lumpur" -> "9 km/h"
-        "Johor Bahru" -> "10 km/h"
-        else -> "12 km/h"
-    }
+    val condition = getWeatherDescription(weatherCode)
 
     Column(
         modifier = Modifier
@@ -182,33 +186,43 @@ fun UtilityScreen(
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = temperature,
-                    fontSize = 52.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                if (isLoading) {
+                    Text(
+                        text = "Loading weather...",
+                        fontSize = 22.sp
+                    )
+                } else if (errorMessage != null) {
+                    Text(
+                        text = errorMessage,
+                        fontSize = 18.sp
+                    )
+                } else {
+                    Text(
+                        text = temperatureText,
+                        fontSize = 52.sp,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                Text(
-                    text = condition,
-                    fontSize = 22.sp
-                )
+                    Text(
+                        text = condition,
+                        fontSize = 22.sp
+                    )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                WeatherInfoRow(label = "Humidity", value = humidity)
-                WeatherInfoRow(label = "Wind Speed", value = windSpeed)
-                WeatherInfoRow(label = "Feels Like", value = feelsLike)
+                    WeatherInfoRow(label = "Humidity", value = "$humidity%")
+                    WeatherInfoRow(label = "Wind Speed", value = "${windSpeed.roundToInt()} km/h")
+                    WeatherInfoRow(label = "Feels Like", value = feelsLikeText)
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(
-            onClick = {
-                // API refresh function will be added later.
-            }
+            onClick = onRefresh
         ) {
             Text(text = "Refresh Weather")
         }
@@ -310,5 +324,19 @@ fun SettingsScreen(
         Text(
             text = "These settings control the city and temperature unit shown on the main utility screen."
         )
+    }
+}
+
+fun getWeatherDescription(code: Int): String {
+    return when (code) {
+        0 -> "Clear Sky"
+        1, 2 -> "Partly Cloudy"
+        3 -> "Cloudy"
+        45, 48 -> "Foggy"
+        51, 53, 55 -> "Drizzle"
+        61, 63, 65 -> "Rain"
+        80, 81, 82 -> "Rain Showers"
+        95, 96, 99 -> "Thunderstorm"
+        else -> "Unknown Weather"
     }
 }
